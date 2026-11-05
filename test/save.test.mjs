@@ -151,3 +151,29 @@ test('模板按钮 args 三种形状都能识别', async () => {
   const bad = panels.prices.actions.modelTemplate({}, { value: { unrelated: 1 }, locale: 'zh-CN' })
   assert.equal(bad.toast, '这个模板不可用')
 })
+
+test('选「全天一个价」即时隐藏峰谷字段（不落盘）', async () => {
+  const { dir, panels } = await loadPlugin()
+  panels.prices.view({}, { locale: 'zh-CN' })
+  const before = JSON.stringify(read(dir))
+  panels.prices.actions.editModelSettings({}, { value: { model: Object.keys(JSON.parse(before).models)[0] }, locale: 'zh-CN' })
+  const peakView = JSON.stringify(panels.prices.view({}, { locale: 'zh-CN' }))
+  assert.ok(peakView.includes('s_windows'), '默认应显示峰谷字段')
+  const res = panels.prices.actions.setModelMode({}, { value: { s_mode: 'flat' }, locale: 'zh-CN' })
+  assert.equal(res.refresh, true)
+  const flatView = JSON.stringify(panels.prices.view({}, { locale: 'zh-CN' }))
+  assert.ok(!flatView.includes('s_windows'), 'flat 后峰时段消失')
+  assert.ok(!flatView.includes('M_in'), 'flat 后峰价消失')
+  assert.ok(flatView.includes('data.s_mode'), '选项还在')
+  let data = {}
+  panels.prices.data({}, (v) => { data = v })
+  assert.equal(data.s_mode, 'flat', '数据层同步')
+  assert.equal(JSON.stringify(read(dir)), before, '只改界面，不写盘')
+  // 切回峰谷
+  panels.prices.actions.setModelMode({}, { value: { value: 'peak' }, locale: 'zh-CN' })
+  assert.ok(JSON.stringify(panels.prices.view({}, { locale: 'zh-CN' })).includes('s_windows'))
+  // 保存后覆盖清除、真正落盘
+  panels.prices.actions.setModelMode({}, { value: { s_mode: 'flat' }, locale: 'zh-CN' })
+  panels.prices.actions.saveModel({}, { value: { s_mode: 'flat', m_in: 2 }, locale: 'zh-CN' })
+  assert.equal(read(dir).models[Object.keys(JSON.parse(before).models)[0]].schedule.enabled, false)
+})
