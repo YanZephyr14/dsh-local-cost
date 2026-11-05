@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { DEFAULT_CONFIG, clone, parseWindows, sanitize, toMinutes } from '../lib/config.js'
 import { costParts, isPeakAt, nextSwitch, resolvePrice, wallClock } from '../lib/pricing.js'
 import { share, summarize } from '../lib/summary.js'
-import { collectFields, applyFields, pricesData } from '../lib/editor.js'
+import { collectFields, applyPeak, applyModels, applyAddModel, addUnpriced, editableModels, pricesData, unpricedModels } from '../lib/editor.js'
 
 const at = (iso) => Date.parse(iso)
 const config = () => sanitize(clone(DEFAULT_CONFIG)).config
@@ -131,20 +131,65 @@ test('峰时段解析', () => {
   assert.equal(toMinutes('9:05'), 545)
 })
 
-test('表单字段收集与保存', () => {
+test('时段表单：只改窗口不动价格', () => {
   const cfg = config()
-  const data = pricesData(cfg)
-  assert.ok('p0_in' in data)
-  const payload = { data: { ...data, p0_in: '3', P0_in: '6', g_windows: '08:00-10:00' } }
-  const fields = collectFields(payload)
-  assert.equal(fields.p0_in, '3')
-  const messages = { windows: 'bad', weekend: 'bad' }
-  const applied = applyFields(cfg, fields, messages)
-  assert.equal(applied.error, null)
-  assert.equal(applied.config.peak.windows[0].start, '08:00')
-  const model = applied.config.models['custom-dashscope-aliyuncs:deepseek-v4.1-flash-1017']
-  assert.equal(model.offPeak.input, 3)
-  assert.equal(model.peak.input, 6)
-  const bad = applyFields(cfg, { g_windows: 'nope' }, messages)
-  assert.equal(bad.error, 'bad')
+  const before = JSON.stringify(cfg.models)
+  const fields = collectFields({ data: { g_windows: '08:00-10:00', g_weekend: 'ignore' } })
+  const r = applyPeak(cfg, fields, { windows: 'bad', weekend: 'bad' })
+  assert.equal(r.error, undefined)
+  assert.deepEqual(r.config.peak.windows, [{ start: '08:00', end: '10:00' }])
+  assert.equal(r.config.peak.weekend, 'ignore')
+  assert.equal(JSON.stringify(r.config.models), before)
+  assert.equal(applyPeak(cfg, { g_windows: 'nope' }, { windows: 'bad' }).error, 'bad')
+  assert.equal(applyPeak(cfg, { g_weekend: '周末' }, { weekend: 'bad-wk' }).error, 'bad-wk')
+})
+
+test('单价表单：改谷时与峰时，其余模型不动', () => {
+  const cfg = config()
+  cfg.models.second = { offPeak: { input: 7, output: 8 } }
+  const data = collectFields({ data: { p0_in: '3', p0_cr: '0.3', p0_out: '9', P0_in: '6', P0_cr: '0.6', P0_out: '18' } })
+  const r = applyModels(cfg, data, { noChange: 'same' })
+  assert.equal(r.error, undefined)
+  assert.equal(r.touched, 1)
+  const first = r.config.models[editableModels(cfg)[0].key]
+  assert.deepEqual(first.offPeak, { input: 3, cacheRead: 0.3, output: 9 })
+  assert.deepEqual(first.peak, { input: 6, cacheRead: 0.6, output: 18 })
+  assert.deepEqual(r.config.models.second, cfg.models.second)
+  assert.equal(applyModels(cfg, collectFields({ data: pricesData(cfg) }), { noChange: 'same' }).error, 'same')
+})
+
+test('新增模型：空 key / 重名 / 正常', () => {
+  const cfg = config()
+  const msgs = { needKey: 'need', badKey: 'bad', exists: 'dup', full: 'full' }
+  assert.equal(applyAddModel(cfg, { n_key: '  ' }, msgs).error, 'need')
+  assert.equal(applyAddModel(cfg, { n_key: Object.keys(cfg.models)[0] }, msgs).error, 'dup')
+  const r = applyAddModel(cfg, { n_key: 'openai:gpt-6', n_in: '10', n_cr: '1', n_out: '40' }, msgs)
+  assert.equal(r.added, 'openai:gpt-6')
+  assert.deepEqual(r.config.models['openai:gpt-6'].offPeak, { input: 10, cacheRead: 1, output: 40 })
+  assert.deepEqual(r.config.models['openai:gpt-6'].peak, { input: 10, cacheRead: 1, output: 40 })
+  assert.equal(Object.keys(cfg.models).length, 1, '原配置不应被改')
+})
+
+test('未定价模型：识别 + 批量并入（抄 default）', () => {
+  const cfg = config()
+  cfg.models.default = { offPeak: { input: 2, cacheRead: 0.2, output: 8 } }
+  const state = {
+    models: [
+      { model: 'a-new', calls: 3, tokens: 100, amount: 0, priced: 0 },
+      { model: 'deepseek-v4.1-flash-1017', calls: 5, tokens: 200, amount: 1, priced: 5 },
+    ],
+  }
+  const pending = unpricedModels(state, cfg)
+  assert.deepEqual(pending, ['a-new'])
+  const { config: next, added } = addUnpriced(cfg, pending)
+  assert.deepEqual(added, ['a-new'])
+  assert.deepEqual(next.models['a-new'].offPeak, { input: 2, cacheRead: 0.2, output: 8 })
+  assert.deepEqual(unpricedModels({ models: state.models.map((r) => ({ ...r, priced: 1 })) }, next), [])
+})
+
+test('非法时区被拒绝并给出提示', () => {
+  const { config: cfg, issues } = sanitize({ peak: { tz: 'Mars/Base' } })
+  assert.equal(cfg.peak.tz, DEFAULT_CONFIG.peak.tz)
+  assert.ok(issues.some((m) => m.includes('时区')))
+  assert.equal(sanitize({ peak: { tz: 'UTC' } }).issues.length, 0)
 })
