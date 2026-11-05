@@ -1,31 +1,85 @@
 {
   "v": 1,
-  "currency": { "code": "CNY", "symbol": "¥", "perTokens": 1000000, "decimals": 3 },
+  "mode": "global",
+  "currency": {
+    "code": "CNY",
+    "symbol": "¥",
+    "perTokens": 1000000,
+    "decimals": 3
+  },
   "peak": {
     "enabled": true,
     "tz": "Asia/Shanghai",
-    "windows": [{ "start": "08:00", "end": "22:00" }],
+    "windows": [
+      {
+        "start": "08:00",
+        "end": "22:00"
+      }
+    ],
     "weekend": "ignore",
     "holidays": []
   },
   "models": {
     "bailian:deepseek-v4.1": {
-      "offPeak": { "input": 0.5, "cacheRead": 0.05, "output": 2 },
-      "peak": { "input": 1, "cacheRead": 0.1, "output": 4 },
-      "schedule": { "windows": [{ "start": "08:00", "end": "22:00" }], "weekend": "ignore" }
+      "offPeak": {
+        "input": 0.5,
+        "cacheRead": 0.05,
+        "output": 2
+      },
+      "peak": {
+        "input": 1,
+        "cacheRead": 0.1,
+        "output": 4
+      },
+      "schedule": {
+        "windows": [
+          {
+            "start": "08:00",
+            "end": "22:00"
+          }
+        ],
+        "weekend": "ignore"
+      }
     },
     "deepseek-official:deepseek-v4.1-flash": {
-      "offPeak": { "input": 1, "cacheRead": 0.1, "output": 4 },
-      "peak": { "input": 2, "cacheRead": 0.2, "output": 8 },
+      "offPeak": {
+        "input": 1,
+        "cacheRead": 0.1,
+        "output": 4
+      },
+      "peak": {
+        "input": 2,
+        "cacheRead": 0.2,
+        "output": 8
+      },
       "schedule": {
-        "windows": [{ "start": "09:00", "end": "12:00" }, { "start": "14:00", "end": "18:00" }],
+        "windows": [
+          {
+            "start": "09:00",
+            "end": "12:00"
+          },
+          {
+            "start": "14:00",
+            "end": "18:00"
+          }
+        ],
         "weekend": "offPeak",
-        "holidays": ["2026-10-01"]
+        "holidays": [
+          "2026-10-01"
+        ]
       }
     },
     "default": {
-      "offPeak": { "input": 1, "cacheRead": 0.1, "output": 4 },
-      "peak": { "input": 2, "cacheRead": 0.2, "output": 8 }
+      "offPeak": {
+        "input": 1,
+        "cacheRead": 0.1,
+        "output": 4
+      },
+      "peak": {
+        "input": 2,
+        "cacheRead": 0.2,
+        "output": 8
+      }
     }
   }
 }

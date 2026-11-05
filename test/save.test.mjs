@@ -105,3 +105,18 @@ test('下拉切换模型：refresh 且视图跟着换', async () => {
   assert.equal(data.m_sel, 'another')
   assert.equal(data.m_in, 5)
 })
+
+test('切到全天一个价：mode 与 enabled 一起落盘，界面不再有时段', async () => {
+  const { dir, panels } = await loadPlugin()
+  const res = panels.prices.actions.setMode({}, { value: { 'data.mode': 'flat' }, locale: 'zh-CN' })
+  assert.equal(res.toast, '已切换计价模式')
+  const cfg = read(dir)
+  assert.equal(cfg.mode, 'flat')
+  assert.equal(cfg.peak.enabled, false)
+  const text = JSON.stringify(panels.prices.view({}, { locale: 'zh-CN' }))
+  assert.ok(!text.includes('g_windows'), 'flat 面板不应再渲染时段表单')
+  // 切回统一峰谷
+  panels.prices.actions.setMode({}, { value: { value: 'global' }, locale: 'zh-CN' })
+  assert.equal(read(dir).peak.enabled, true)
+  assert.ok(JSON.stringify(panels.prices.view({}, { locale: 'zh-CN' })).includes('g_windows'))
+})

@@ -317,3 +317,56 @@ test('模型模板：峰谷关系只动选中模型', () => {
   assert.equal(applyModelTemplate(cfg, 'ghost', 'peak2x').error, 'nf')
   assert.equal(applyModelTemplate(cfg, key, 'nope').error, 'tpl')
 })
+
+test('计价模式：推断、切换、模板联动', async () => {
+  const { inferMode, sanitize: san } = await import('../lib/config.js')
+  const { applyMode } = await import('../lib/editor.js')
+  assert.equal(inferMode({ peak: { enabled: false }, models: {} }), 'flat')
+  assert.equal(inferMode({ peak: { enabled: true }, models: { a: { schedule: { windows: [{ start: '08:00', end: '09:00' }] } } } }), 'perModel')
+  assert.equal(inferMode({ peak: { enabled: true }, models: { a: {} } }), 'global')
+  const kept = san({ mode: 'perModel', peak: { enabled: true }, models: { a: { offPeak: { input: 1 } } } })
+  assert.equal(kept.config.mode, 'perModel')
+  const inferred = san({ peak: { enabled: false }, models: { a: { offPeak: { input: 1 } } } })
+  assert.equal(inferred.config.mode, 'flat')
+  const flat = applyMode(config(), 'flat')
+  assert.equal(flat.config.mode, 'flat')
+  assert.equal(flat.config.peak.enabled, false)
+  assert.equal(applyMode(flat.config, 'global').config.peak.enabled, true)
+  assert.equal(applyMode(config(), 'nope').error, 'mode')
+  assert.equal(applyMode(config(), 'constructor').error, 'mode')
+  const tpl = applyGlobalTemplate({ ...config(), mode: 'flat' }, 'bailian')
+  assert.equal(tpl.config.mode, 'global')
+  assert.equal(applyGlobalTemplate({ ...config(), mode: 'perModel' }, 'official').config.mode, 'perModel')
+  assert.equal(applyGlobalTemplate(config(), 'flat').config.mode, 'flat')
+})
+
+test('模式面板：三种模式的视图都合法且字段随模式增减', async () => {
+  const { pricesView } = await import('../lib/views.js')
+  const { pricesData, modelOptions, selectionOf } = await import('../lib/editor.js')
+  const { checkView } = await import('/root/.dsh/skills/dsh-go-plugin/kit/lib/view-check.js')
+  const countInputs = (n) => {
+    let c = ['textField', 'number', 'segmented', 'select'].includes(n.type) ? 1 : 0
+    for (const k of ['children']) for (const x of n[k] ?? []) c += countInputs(x)
+    for (const it of n.items ?? []) for (const x of it.children ?? []) c += countInputs(x)
+    return c
+  }
+  const cfg = config()
+  for (const mode of ['flat', 'global', 'perModel']) {
+    const c = { ...cfg, mode }
+    const view = pricesView(c, modelOptions(c), { locale: 'zh-CN' }, { selected: selectionOf(c, null), unpriced: [], hiddenModels: 0 })
+    const text = JSON.stringify(view)
+    const r = checkView(view, { budget: 'panel', lang: 'zh', data: pricesData(c, selectionOf(c, null)) })
+    assert.ok(r.ok, `${mode} 视图非法`)
+    assert.equal(r.issues.filter((i) => i.kind === 'broken').length, 0, mode)
+    const n = countInputs(view)
+    assert.ok(n <= 32, `${mode} 输入框 ${n} 超预算`)
+    if (mode === 'flat') {
+      assert.ok(!text.includes('data.M_in'), 'flat 不应有峰价字段')
+      assert.ok(!text.includes('data.g_windows'), 'flat 不应有时段字段')
+    } else {
+      assert.ok(text.includes('data.M_in'))
+      assert.ok(text.includes('data.g_windows'))
+    }
+    assert.equal(text.includes('data.m_windows'), mode === 'perModel')
+  }
+})
