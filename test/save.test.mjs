@@ -177,3 +177,21 @@ test('选「全天一个价」即时隐藏峰谷字段（不落盘）', async ()
   panels.prices.actions.saveModel({}, { value: { s_mode: 'flat', m_in: 2 }, locale: 'zh-CN' })
   assert.equal(read(dir).models[Object.keys(JSON.parse(before).models)[0]].schedule.enabled, false)
 })
+
+test('切换模型：动作把新模型的数据一起推下去（不再停在旧值）', async () => {
+  const { dir, panels } = await loadPlugin()
+  panels.prices.view({}, { locale: 'zh-CN' })
+  const cfg = read(dir)
+  const configured = Object.keys(cfg.models)[0]
+  cfg.models['zero-model'] = { offPeak: { input: 0, cacheRead: 0, output: 0 }, peak: { input: 0, cacheRead: 0, output: 0 } }
+  const { saveConfig } = await import(path.join(dir, 'lib', 'config.js'))
+  saveConfig(dir, cfg)
+  // 先进全 0 模型
+  panels.prices.actions.editModelSettings({}, { value: { model: 'zero-model' }, locale: 'zh-CN' })
+  // 再进配置好的模型：动作返回值必须带它的价格
+  const res = panels.prices.actions.editModelSettings({}, { value: { model: configured }, locale: 'zh-CN' })
+  assert.equal(res.patch.m_sel, configured)
+  assert.equal(res.patch.m_in, cfg.models[configured].offPeak.input)
+  assert.equal(res.patch.M_out, cfg.models[configured].peak.output)
+  assert.notEqual(res.patch.m_in, 0)
+})
