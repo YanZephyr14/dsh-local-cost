@@ -18,24 +18,50 @@
   },
   "dshGo": {
     "v": 1,
-    "title": { "zh": "费用自配", "en": "Cost" },
+    "title": {
+      "zh": "费用自配",
+      "en": "Cost"
+    },
     "icon": "coin",
     "contributes": {
       "composer.strip": [
-        { "id": "today", "icon": "coin", "text": "今日 —", "panel": "cost" }
+        {
+          "id": "today",
+          "icon": "coin",
+          "text": "今日 —",
+          "panel": "cost"
+        }
       ],
       "panels": [
         {
           "id": "cost",
           "title": "费用",
           "icon": "coin",
-          "placement": ["session.tab", "features"]
+          "placement": [
+            "session.tab",
+            "features"
+          ]
         },
         {
           "id": "prices",
           "title": "价格设置",
           "icon": "wallet",
-          "placement": ["session.tab", "features"]
+          "placement": [
+            "session.tab",
+            "features"
+          ]
+        },
+        {
+          "id": "more",
+          "title": {
+            "zh": "更多",
+            "en": "More"
+          },
+          "icon": "settings",
+          "placement": [
+            "session.tab",
+            "features"
+          ]
         }
       ]
     }

@@ -1,9 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DEFAULT_CONFIG, clone, parseWindows, sanitize, toMinutes } from '../lib/config.js'
-import { costParts, isPeakAt, nextSwitch, resolvePrice, wallClock } from '../lib/pricing.js'
+import { costParts, effectivePeak, isPeakAt, nextSwitch, priceCall, resolvePrice, wallClock } from '../lib/pricing.js'
 import { share, summarize } from '../lib/summary.js'
-import { collectFields, applyPeak, applyModels, applyAddModel, addUnpriced, editableModels, pricesData, unpricedModels } from '../lib/editor.js'
+import { collectFields, applyPeak, applyModels, applyAddModel, applyCurrency, applyDefault, deleteModel, addUnpriced, editableModels, pricesData, unpricedModels } from '../lib/editor.js'
 
 const at = (iso) => Date.parse(iso)
 const config = () => sanitize(clone(DEFAULT_CONFIG)).config
@@ -192,4 +192,65 @@ test('非法时区被拒绝并给出提示', () => {
   assert.equal(cfg.peak.tz, DEFAULT_CONFIG.peak.tz)
   assert.ok(issues.some((m) => m.includes('时区')))
   assert.equal(sanitize({ peak: { tz: 'UTC' } }).issues.length, 0)
+})
+
+test('模型自己的峰时段覆盖全局（百炼 8–22 点）', () => {
+  const cfg = config()
+  cfg.peak = { enabled: true, tz: 'Asia/Shanghai', windows: [{ start: '09:00', end: '12:00' }], weekend: 'offPeak', holidays: [] }
+  cfg.models.bailian = {
+    offPeak: { input: 1, output: 4 },
+    peak: { input: 2, output: 8 },
+    schedule: { windows: [{ start: '08:00', end: '22:00' }], weekend: 'ignore' },
+  }
+  const clock = (iso) => wallClock(at(iso), 'Asia/Shanghai')
+  const entry = cfg.models.bailian
+  assert.equal(isPeakAt(clock('2026-11-05T10:00:00+08:00'), effectivePeak(cfg, entry), at('2026-11-05T10:00:00+08:00')), true)
+  assert.equal(isPeakAt(clock('2026-11-05T12:30:00+08:00'), effectivePeak(cfg, entry), at('2026-11-05T12:30:00+08:00')), true)
+  assert.equal(isPeakAt(clock('2026-11-05T23:00:00+08:00'), effectivePeak(cfg, entry), at('2026-11-05T23:00:00+08:00')), false)
+  // 周六：全局按谷时，但该模型 weekend=ignore，8 点仍算峰
+  assert.equal(isPeakAt(clock('2026-11-07T10:00:00+08:00'), effectivePeak(cfg, entry), at('2026-11-07T10:00:00+08:00')), true)
+  // 没有 schedule 的模型继续用全局
+  assert.equal(isPeakAt(clock('2026-11-07T10:00:00+08:00'), effectivePeak(cfg, cfg.models[Object.keys(cfg.models)[0]]), at('2026-11-07T10:00:00+08:00')), false)
+})
+
+test('priceCall 按模型规则算钱', () => {
+  const cfg = config()
+  cfg.models.bailian = { offPeak: { input: 1, output: 4 }, peak: { input: 2, output: 8 }, schedule: { windows: [{ start: '08:00', end: '22:00' }], weekend: 'ignore' } }
+  const call = { t: at('2026-11-05T10:00:00+08:00'), provider: 'x', model: 'bailian', input: 1000, cacheRead: 0, cacheWrite: 0, output: 100 }
+  const r = priceCall(call, cfg, wallClock(call.t, 'Asia/Shanghai'))
+  assert.equal(r.peak, true)
+  assert.ok(Math.abs(r.total - (1000 * 2 + 100 * 8) / 1e6) < 1e-12)
+})
+
+test('每个模型可以覆盖/清空峰时段', () => {
+  const cfg = config()
+  const key = editableModels(cfg)[0].key
+  const set = applyModels(cfg, collectFields({ data: { w0: '08:00-22:00' } }), { windows: 'bad', noChange: 'same' })
+  assert.equal(set.error, undefined)
+  assert.deepEqual(set.config.models[key].schedule.windows, [{ start: '08:00', end: '22:00' }])
+  const cleared = applyModels(set.config, collectFields({ data: { w0: '' } }), { windows: 'bad', noChange: 'same' })
+  assert.equal(cleared.config.models[key].schedule, undefined)
+  assert.equal(applyModels(cfg, collectFields({ data: { w0: 'nope' } }), { windows: 'bad', noChange: 'same' }).error, 'bad')
+})
+
+test('兜底价 default、单位、删除模型', () => {
+  const cfg = config()
+  const d = applyDefault(cfg, collectFields({ data: { d_in: '3', d_out: '12', D_in: '6', D_out: '24' } }), { needRate: 'need' })
+  assert.equal(d.error, undefined)
+  assert.deepEqual(d.config.models.default.offPeak, { input: 3, cacheRead: 0, output: 12 })
+  assert.deepEqual(d.config.models.default.peak, { input: 6, cacheRead: 0, output: 24 })
+  // 未匹配模型命中 default
+  assert.equal(resolvePrice(d.config.models, 'x', 'nothing').matched, 'default')
+
+  const cur = applyCurrency(cfg, collectFields({ data: { c_symbol: 'US$', c_per: '1000', c_dec: '4' } }))
+  assert.equal(cur.config.currency.symbol, 'US$')
+  assert.equal(cur.config.currency.perTokens, 1000)
+  assert.equal(cur.config.currency.decimals, 4)
+
+  const key = editableModels(cfg)[0].key
+  const del = deleteModel(cfg, { del_key: key }, { needKey: 'need', notDeletable: 'no', notFound: 'nf' })
+  assert.equal(del.removed, key)
+  assert.equal(del.config.models[key], undefined)
+  assert.equal(deleteModel(cfg, { del_key: 'default' }, { notDeletable: 'no' }).error, 'no')
+  assert.equal(deleteModel(cfg, { del_key: 'nope' }, { notFound: 'nf' }).error, 'nf')
 })
