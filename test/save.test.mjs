@@ -78,7 +78,10 @@ test('画面导航：列表→编辑→返回，删除此模型回列表', async
   panels.prices.actions.saveModel({}, { value: { s_mode: 'flat', m_in: 2 }, locale: 'zh-CN' })
   assert.equal(read(dir).models[key].schedule.enabled, false)
   assert.ok(!JSON.stringify(panels.prices.view({}, { locale: 'zh-CN' })).includes('data.s_windows'), 'flat 编辑页无时段字段')
-  // 删除此模型 → 回列表
+  // 删除此模型：两步确认，第一次只武装，第二次才删并回列表
+  const arm = panels.prices.actions.deleteThis({}, { locale: 'zh-CN' })
+  assert.equal(arm.toast, '再点一次「删除此模型」确认（10 秒内）')
+  assert.ok(read(dir).models[key], '第一次点击没删')
   const del = panels.prices.actions.deleteThis({}, { locale: 'zh-CN' })
   assert.equal(del.toast, `已删除 ${key}`)
   assert.equal(read(dir).models[key], undefined)

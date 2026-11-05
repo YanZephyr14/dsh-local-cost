@@ -143,3 +143,12 @@ test('费用面板视图预算：节点与体积不超协议上限', async () =>
   walk(view)
   assert.ok(nodes <= 120, `节点 ${nodes} 超 120`)
 })
+
+test('setRange：全部区间可用，视图标题为「全部」', async () => {
+  const { panels } = await loadPlugin()
+  panels.cost.view({}, { locale: 'zh-CN' })
+  const res = panels.cost.actions.setRange({}, { value: { r_mode: 'all' }, locale: 'zh-CN' })
+  assert.equal(res.patch.r_mode, 'all')
+  const view = JSON.stringify(panels.cost.view({}, { locale: 'zh-CN' }))
+  assert.ok(view.includes('全部'))
+})
