@@ -117,3 +117,37 @@ test('下拉切换模型：refresh 且视图跟着换', async () => {
   assert.equal(data.m_sel, 'another')
   assert.equal(data.m_in, 5)
 })
+
+test('点费用行编辑的是生效条目，不再产生裸名影子条目', async () => {
+  const { dir, panels } = await loadPlugin()
+  panels.prices.view({}, { locale: 'zh-CN' })
+  const cfg = read(dir)
+  const providerKey = Object.keys(cfg.models)[0] // custom-dashscope-aliyuncs:deepseek-v4.1-flash-1017
+  const model = providerKey.split(':')[1]
+  const res = panels.cost.actions.editModel({}, { value: { model, provider: 'custom-dashscope-aliyuncs' }, locale: 'zh-CN' })
+  assert.deepEqual(res, { open: 'panel:prices' }, '已存在生效条目 → 不新建、不提示建条目')
+  const after = read(dir)
+  assert.equal(Object.keys(after.models).length, Object.keys(cfg.models).length, '不应新增条目')
+  let data = {}
+  panels.prices.data({}, (v) => { data = v })
+  assert.equal(data.m_sel, providerKey, '编辑页选中 provider:model 条目')
+})
+
+test('模板按钮 args 三种形状都能识别', async () => {
+  const { dir, panels } = await loadPlugin()
+  panels.prices.view({}, { locale: 'zh-CN' })
+  const key = Object.keys(read(dir).models)[0]
+  const before = read(dir).models[key].offPeak.input
+  for (const value of [{ tpl: 'peak2x' }, { args: { tpl: 'peak2x' } }, 'peak2x']) {
+    const res = panels.prices.actions.modelTemplate({}, { value, locale: 'zh-CN' })
+    assert.equal(res.toast, '已套用模板', JSON.stringify(value))
+    assert.equal(read(dir).models[key].peak.input, before * 2)
+    // 还原再测下一种形状
+    const cfg = read(dir)
+    cfg.models[key].peak.input = before
+    const { saveConfig } = await import(path.join(dir, 'lib', 'config.js'))
+    saveConfig(dir, cfg)
+  }
+  const bad = panels.prices.actions.modelTemplate({}, { value: { unrelated: 1 }, locale: 'zh-CN' })
+  assert.equal(bad.toast, '这个模板不可用')
+})
