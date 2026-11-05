@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { DEFAULT_CONFIG, clone, parseWindows, sanitize, toMinutes } from '../lib/config.js'
 import { costParts, effectivePeak, isPeakAt, nextSwitch, priceCall, resolvePrice, wallClock } from '../lib/pricing.js'
 import { share, summarize } from '../lib/summary.js'
-import { collectFields, applyPeak, applyModels, applyAddModel, applyCurrency, applyDefault, deleteModel, addUnpriced, editableModels, ensureModelEntry, modelOptions, pricesData, selectionOf, unpricedModels } from '../lib/editor.js'
+import { collectFields, applyPeak, applyModelSettings, applyAddModel, applyCurrency, applyDefault, deleteModel, addUnpriced, editableModels, ensureModelEntry, modelOptions, pricesData, selectionOf, unpricedModels } from '../lib/editor.js'
 import { applyGlobalTemplate, applyModelTemplate } from '../lib/templates.js'
 
 const at = (iso) => Date.parse(iso)
@@ -145,25 +145,6 @@ test('时段表单：只改窗口不动价格', () => {
   assert.equal(applyPeak(cfg, { g_weekend: '周末' }, { weekend: 'bad-wk' }).error, 'bad-wk')
 })
 
-test('单价表单：只作用于选中模型', () => {
-  const cfg = config()
-  const key = Object.keys(cfg.models)[0]
-  cfg.models.second = { offPeak: { input: 7, cacheRead: 0, output: 8 }, peak: { input: 7, cacheRead: 0, output: 8 } }
-  const fields = collectFields({ data: { m_in: '3', m_cr: '0.3', m_out: '9', M_in: '6', M_cr: '0.6', M_out: '18' } })
-  const r = applyModels(cfg, fields, { noChange: 'same', notFound: 'nf' }, key)
-  assert.equal(r.error, undefined)
-  assert.equal(r.key, key)
-  assert.deepEqual(r.config.models[key].offPeak, { input: 3, cacheRead: 0.3, output: 9 })
-  assert.deepEqual(r.config.models[key].peak, { input: 6, cacheRead: 0.6, output: 18 })
-  assert.deepEqual(r.config.models.second, cfg.models.second, '别的模型不动')
-  // m_sel 指定另一个模型
-  const r2 = applyModels(cfg, { m_sel: 'second', m_in: 5 }, { noChange: 'same', notFound: 'nf' }, key)
-  assert.equal(r2.config.models.second.offPeak.input, 5)
-  assert.equal(r2.config.models[key].offPeak.input, 1)
-  assert.equal(applyModels(cfg, { m_in: 1 }, { noChange: 'same', notFound: 'nf' }, 'ghost').error, 'nf')
-  assert.equal(applyModels(cfg, collectFields({ data: pricesData(cfg, key) }), { noChange: 'same', notFound: 'nf' }, key).error, 'same')
-})
-
 test('选中模型：失效回落第一个；数据跟着选中切换', () => {
   const cfg = config()
   const keys = modelOptions(cfg).map((m) => m.key)
@@ -172,17 +153,6 @@ test('选中模型：失效回落第一个；数据跟着选中切换', () => {
   const data = pricesData(cfg, keys[0])
   assert.equal(data.m_sel, keys[0])
   assert.equal(data.m_in, 1)
-})
-
-test('每个模型可以覆盖/清空峰时段（m_windows）', () => {
-  const cfg = config()
-  const key = Object.keys(cfg.models)[0]
-  const set = applyModels(cfg, collectFields({ data: { m_windows: '08:00-22:00' } }), { windows: 'bad', noChange: 'same', notFound: 'nf' }, key)
-  assert.equal(set.error, undefined)
-  assert.deepEqual(set.config.models[key].schedule.windows, [{ start: '08:00', end: '22:00' }])
-  const cleared = applyModels(set.config, collectFields({ data: { m_windows: '' } }), { windows: 'bad', noChange: 'same', notFound: 'nf' }, key)
-  assert.equal(cleared.config.models[key].schedule, undefined)
-  assert.equal(applyModels(cfg, { m_windows: 'nope' }, { windows: 'bad', noChange: 'same' }, key).error, 'bad')
 })
 
 test('ensureModelEntry：未定价模型一键建条目（抄 default）', () => {
@@ -318,9 +288,15 @@ test('模型模板：峰谷关系只动选中模型', () => {
   assert.equal(applyModelTemplate(cfg, key, 'nope').error, 'tpl')
 })
 
+test('删空模型表不再回补默认条目', () => {
+  const { config: cfg } = sanitize({ peak: { enabled: true }, models: {} })
+  assert.deepEqual(Object.keys(cfg.models), [])
+  const seeded = sanitize({ peak: { enabled: true } })
+  assert.ok(Object.keys(seeded.config.models).length >= 1)
+})
+
 test('计价模式：推断、切换、模板联动', async () => {
   const { inferMode, sanitize: san } = await import('../lib/config.js')
-  const { applyMode } = await import('../lib/editor.js')
   assert.equal(inferMode({ peak: { enabled: false }, models: {} }), 'flat')
   assert.equal(inferMode({ peak: { enabled: true }, models: { a: { schedule: { windows: [{ start: '08:00', end: '09:00' }] } } } }), 'perModel')
   assert.equal(inferMode({ peak: { enabled: true }, models: { a: {} } }), 'global')
@@ -328,45 +304,74 @@ test('计价模式：推断、切换、模板联动', async () => {
   assert.equal(kept.config.mode, 'perModel')
   const inferred = san({ peak: { enabled: false }, models: { a: { offPeak: { input: 1 } } } })
   assert.equal(inferred.config.mode, 'flat')
-  const flat = applyMode(config(), 'flat')
-  assert.equal(flat.config.mode, 'flat')
-  assert.equal(flat.config.peak.enabled, false)
-  assert.equal(applyMode(flat.config, 'global').config.peak.enabled, true)
-  assert.equal(applyMode(config(), 'nope').error, 'mode')
-  assert.equal(applyMode(config(), 'constructor').error, 'mode')
   const tpl = applyGlobalTemplate({ ...config(), mode: 'flat' }, 'bailian')
   assert.equal(tpl.config.mode, 'global')
   assert.equal(applyGlobalTemplate({ ...config(), mode: 'perModel' }, 'official').config.mode, 'perModel')
   assert.equal(applyGlobalTemplate(config(), 'flat').config.mode, 'flat')
 })
 
-test('模式面板：三种模式的视图都合法且字段随模式增减', async () => {
+
+test('applyModelSettings：整份写进一个模型，其他模型分毫不动', () => {
+  const cfg = config()
+  const key = Object.keys(cfg.models)[0]
+  cfg.models.other = { offPeak: { input: 7, cacheRead: 0.7, output: 28 }, peak: { input: 14, cacheRead: 1.4, output: 56 } }
+  const msgs = { notFound: 'nf', windows: 'bad-win', weekend: 'bad-wk' }
+  const r = applyModelSettings(cfg, collectFields({ data: {
+    s_mode: 'peak', s_windows: '08:00-22:00', s_weekend: 'ignore', s_holidays: '2026-10-01',
+    m_in: '1', m_cr: '0.2', m_out: '2', M_in: '2', M_cr: '0.4', M_out: '4',
+  } }), msgs, key)
+  assert.equal(r.error, undefined)
+  assert.equal(r.key, key)
+  const e = r.config.models[key]
+  assert.deepEqual(e.schedule, { enabled: true, windows: [{ start: '08:00', end: '22:00' }], weekend: 'ignore', holidays: ['2026-10-01'] })
+  assert.deepEqual(e.offPeak, { input: 1, cacheRead: 0.2, output: 2 })
+  assert.deepEqual(e.peak, { input: 2, cacheRead: 0.4, output: 4 })
+  assert.deepEqual(r.config.models.other, cfg.models.other, '隔离：其他模型原样')
+  assert.equal(JSON.stringify(r.config.peak), JSON.stringify(cfg.peak), '隔离：全局时段原样')
+
+  const flat = applyModelSettings(cfg, { s_mode: 'flat', m_in: 3, m_cr: 0.3, m_out: 6 }, msgs, key)
+  assert.deepEqual(flat.config.models[key].schedule, { enabled: false })
+  assert.deepEqual(flat.config.models[key].offPeak, { input: 3, cacheRead: 0.3, output: 6 })
+  assert.equal(applyModelSettings(cfg, { m_in: 1 }, msgs, 'ghost').error, 'nf')
+  assert.equal(applyModelSettings(cfg, { s_windows: 'nope' }, msgs, key).error, 'bad-win')
+})
+
+test('模型模板 w822/off 只动选中模型', () => {
+  const cfg = config()
+  cfg.models.other = { offPeak: { input: 7, output: 28 } }
+  const key = Object.keys(cfg.models)[0]
+  const r = applyModelTemplate(cfg, key, 'w822')
+  assert.deepEqual(r.config.models[key].schedule.windows, [{ start: '08:00', end: '22:00' }])
+  assert.equal(r.config.models[key].schedule.weekend, 'ignore')
+  assert.equal(r.config.peak.windows[0].start, cfg.peak.windows[0].start, '全局不动')
+  const off = applyModelTemplate(cfg, key, 'off')
+  assert.equal(off.config.models[key].schedule.enabled, false)
+})
+
+test('列表/编辑两画面：视图合法、字段预算内', async () => {
   const { pricesView } = await import('../lib/views.js')
   const { pricesData, modelOptions, selectionOf } = await import('../lib/editor.js')
   const { checkView } = await import('/root/.dsh/skills/dsh-go-plugin/kit/lib/view-check.js')
   const countInputs = (n) => {
     let c = ['textField', 'number', 'segmented', 'select'].includes(n.type) ? 1 : 0
-    for (const k of ['children']) for (const x of n[k] ?? []) c += countInputs(x)
+    for (const x of n.children ?? []) c += countInputs(x)
     for (const it of n.items ?? []) for (const x of it.children ?? []) c += countInputs(x)
     return c
   }
   const cfg = config()
-  for (const mode of ['flat', 'global', 'perModel']) {
-    const c = { ...cfg, mode }
-    const view = pricesView(c, modelOptions(c), { locale: 'zh-CN' }, { selected: selectionOf(c, null), unpriced: [], hiddenModels: 0 })
-    const text = JSON.stringify(view)
-    const r = checkView(view, { budget: 'panel', lang: 'zh', data: pricesData(c, selectionOf(c, null)) })
-    assert.ok(r.ok, `${mode} 视图非法`)
-    assert.equal(r.issues.filter((i) => i.kind === 'broken').length, 0, mode)
-    const n = countInputs(view)
-    assert.ok(n <= 32, `${mode} 输入框 ${n} 超预算`)
-    if (mode === 'flat') {
-      assert.ok(!text.includes('data.M_in'), 'flat 不应有峰价字段')
-      assert.ok(!text.includes('data.g_windows'), 'flat 不应有时段字段')
-    } else {
-      assert.ok(text.includes('data.M_in'))
-      assert.ok(text.includes('data.g_windows'))
-    }
-    assert.equal(text.includes('data.m_windows'), mode === 'perModel')
-  }
+  cfg.other = { offPeak: { input: 7, output: 28 } }
+  const opts = modelOptions(cfg)
+  const list = pricesView(cfg, opts, { locale: 'zh-CN' }, { screen: 'list', selected: selectionOf(cfg, null), unpriced: ['x'] })
+  assert.ok(checkView(list, { budget: 'panel', lang: 'zh', data: pricesData(cfg, null) }).ok)
+  assert.ok(JSON.stringify(list).includes('editModelSettings'))
+  const edit = pricesView(cfg, opts, { locale: 'zh-CN' }, { screen: 'edit', selected: Object.keys(cfg.models)[0] })
+  assert.ok(checkView(edit, { budget: 'panel', lang: 'zh', data: pricesData(cfg, Object.keys(cfg.models)[0]) }).ok)
+  assert.ok(countInputs(edit) <= 32, `编辑页输入 ${countInputs(edit)}`)
+  assert.ok(countInputs(list) <= 32, `列表页输入 ${countInputs(list)}`)
+  assert.ok(!JSON.stringify(list).includes('s_windows'))
+  const text = JSON.stringify(edit)
+  assert.ok(text.includes('s_windows') && text.includes('M_in') && text.includes('saveModel'))
+  const flatCfg = { ...cfg, models: { ...cfg.models, [Object.keys(cfg.models)[0]]: { offPeak: { input: 1 }, schedule: { enabled: false } } } }
+  const editFlat = pricesView(flatCfg, modelOptions(flatCfg), { locale: 'zh-CN' }, { screen: 'edit', selected: Object.keys(cfg.models)[0] })
+  assert.ok(!JSON.stringify(editFlat).includes('s_windows'), 'flat 编辑页不显示时段字段')
 })

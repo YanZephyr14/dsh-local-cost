@@ -32,13 +32,15 @@
         "output": 4
       },
       "schedule": {
+        "enabled": true,
         "windows": [
           {
             "start": "08:00",
             "end": "22:00"
           }
         ],
-        "weekend": "ignore"
+        "weekend": "ignore",
+        "holidays": []
       }
     },
     "deepseek-official:deepseek-v4.1-flash": {
@@ -79,6 +81,21 @@
         "input": 2,
         "cacheRead": 0.2,
         "output": 8
+      }
+    },
+    "qwen-flash": {
+      "offPeak": {
+        "input": 0.5,
+        "cacheRead": 0.05,
+        "output": 2
+      },
+      "peak": {
+        "input": 0.5,
+        "cacheRead": 0.05,
+        "output": 2
+      },
+      "schedule": {
+        "enabled": false
       }
     }
   }

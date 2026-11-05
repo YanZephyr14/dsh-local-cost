@@ -27,50 +27,62 @@ async function loadPlugin() {
 
 const read = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'price.json'), 'utf8'))
 
-test('保存单价：data.* 前缀的 payload 也能落盘', async () => {
+test('保存模型设置：data.* 前缀 payload 端到端落盘且隔离', async () => {
   const { dir, panels } = await loadPlugin()
-  const res = panels.prices.actions.saveModels({}, {
-    value: { 'data.M_in': 6, 'data.M_cr': 0.6, 'data.M_out': 18, 'data.m_in': 3 },
+  panels.prices.view({}, { locale: 'zh-CN' })
+  const key = Object.keys(read(dir).models)[0]
+  const res = panels.prices.actions.saveModel({}, {
+    value: { data: { s_mode: 'peak', s_windows: '08:00-22:00', s_weekend: 'ignore', m_in: 3, m_cr: 0.3, m_out: 9, M_in: 6, M_cr: 0.6, M_out: 18 } },
     locale: 'zh-CN',
   })
-  assert.equal(res.toast, '已保存')
-  assert.equal(res.refresh, true)
+  assert.equal(res.toast, '已保存，只改了这个模型')
   const cfg = read(dir)
-  const key = Object.keys(cfg.models)[0]
-  assert.equal(cfg.models[key].peak.input, 6)
-  assert.equal(cfg.models[key].peak.cacheRead, 0.6)
-  assert.equal(cfg.models[key].peak.output, 18)
-  assert.equal(cfg.models[key].offPeak.input, 3)
+  const e = cfg.models[key]
+  assert.deepEqual(e.peak, { input: 6, cacheRead: 0.6, output: 18 })
+  assert.deepEqual(e.schedule.windows, [{ start: '08:00', end: '22:00' }])
+  assert.equal(e.schedule.weekend, 'ignore')
+  assert.deepEqual(cfg.peak.windows, [{ start: '09:00', end: '12:00' }, { start: '14:00', end: '18:00' }], '全局时段原样')
 })
 
-test('保存单价：键值对数组形状也能落盘', async () => {
+test('保存模型设置：键值对数组形状同样可用', async () => {
   const { dir, panels } = await loadPlugin()
-  const res = panels.prices.actions.saveModels({}, {
+  panels.prices.view({}, { locale: 'zh-CN' })
+  const key = Object.keys(read(dir).models)[0]
+  const res = panels.prices.actions.saveModel({}, {
     value: [{ bind: 'data.M_out', value: 9 }],
     locale: 'zh-CN',
   })
-  assert.equal(res.toast, '已保存')
-  const cfg = read(dir)
-  const key = Object.keys(cfg.models)[0]
-  assert.equal(cfg.models[key].peak.output, 9)
+  assert.equal(res.toast, '已保存，只改了这个模型')
+  assert.equal(read(dir).models[key].peak.output, 9)
 })
 
 test('空 payload：给出提示且不写盘', async () => {
   const { dir, panels } = await loadPlugin()
-  panels.prices.actions.savePeak({}, { value: { 'data.g_windows': '08:00-22:00' }, locale: 'zh-CN' })
+  panels.prices.view({}, { locale: 'zh-CN' })
   const before = read(dir)
-  const res = panels.prices.actions.saveModels({}, { value: { something: 1 }, locale: 'zh-CN' })
+  const res = panels.prices.actions.saveModel({}, { value: { something: 1 }, locale: 'zh-CN' })
   assert.equal(res.toast, '没收到新的价格，请重试')
-  assert.equal(res.refresh, undefined)
   assert.deepEqual(read(dir), before)
 })
 
-test('时段与新增模型走同一个归一化', async () => {
+test('画面导航：列表→编辑→返回，删除此模型回列表', async () => {
   const { dir, panels } = await loadPlugin()
-  assert.equal(panels.prices.actions.savePeak({}, { value: { 'data.g_windows': '08:00-22:00' }, locale: 'zh-CN' }).toast, '已保存')
-  assert.deepEqual(read(dir).peak.windows, [{ start: '08:00', end: '22:00' }])
-  assert.equal(panels.prices.actions.addModel({}, { value: { 'data.n_key': 'bailian:ds', 'data.n_in': 1 }, locale: 'zh-CN' }).toast, '已保存')
-  assert.equal(read(dir).models['bailian:ds'].offPeak.input, 1)
+  panels.prices.view({}, { locale: 'zh-CN' })
+  const key = Object.keys(read(dir).models)[0]
+  panels.prices.actions.editModelSettings({}, { value: { model: key }, locale: 'zh-CN' })
+  assert.ok(JSON.stringify(panels.prices.view({}, { locale: 'zh-CN' })).includes('saveModel'), '编辑画面')
+  panels.prices.actions.backToList({}, { locale: 'zh-CN' })
+  assert.ok(!JSON.stringify(panels.prices.view({}, { locale: 'zh-CN' })).includes('data.s_windows'), '列表画面')
+  // flat 保存后编辑页不再显示时段字段
+  panels.prices.actions.editModelSettings({}, { value: { model: key }, locale: 'zh-CN' })
+  panels.prices.actions.saveModel({}, { value: { s_mode: 'flat', m_in: 2 }, locale: 'zh-CN' })
+  assert.equal(read(dir).models[key].schedule.enabled, false)
+  assert.ok(!JSON.stringify(panels.prices.view({}, { locale: 'zh-CN' })).includes('data.s_windows'), 'flat 编辑页无时段字段')
+  // 删除此模型 → 回列表
+  const del = panels.prices.actions.deleteThis({}, { locale: 'zh-CN' })
+  assert.equal(del.toast, `已删除 ${key}`)
+  assert.equal(read(dir).models[key], undefined)
+  assert.ok(!JSON.stringify(panels.prices.view({}, { locale: 'zh-CN' })).includes('saveModel'))
 })
 
 test('点未定价模型：建条目并跳到价格面板', async () => {
@@ -104,19 +116,4 @@ test('下拉切换模型：refresh 且视图跟着换', async () => {
   panels.prices.data({}, (v) => { data = v })
   assert.equal(data.m_sel, 'another')
   assert.equal(data.m_in, 5)
-})
-
-test('切到全天一个价：mode 与 enabled 一起落盘，界面不再有时段', async () => {
-  const { dir, panels } = await loadPlugin()
-  const res = panels.prices.actions.setMode({}, { value: { 'data.mode': 'flat' }, locale: 'zh-CN' })
-  assert.equal(res.toast, '已切换计价模式')
-  const cfg = read(dir)
-  assert.equal(cfg.mode, 'flat')
-  assert.equal(cfg.peak.enabled, false)
-  const text = JSON.stringify(panels.prices.view({}, { locale: 'zh-CN' }))
-  assert.ok(!text.includes('g_windows'), 'flat 面板不应再渲染时段表单')
-  // 切回统一峰谷
-  panels.prices.actions.setMode({}, { value: { value: 'global' }, locale: 'zh-CN' })
-  assert.equal(read(dir).peak.enabled, true)
-  assert.ok(JSON.stringify(panels.prices.view({}, { locale: 'zh-CN' })).includes('g_windows'))
 })
