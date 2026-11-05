@@ -1,6 +1,6 @@
 {
   "name": "local-cost",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
@@ -35,7 +35,10 @@
       "panels": [
         {
           "id": "cost",
-          "title": "费用",
+          "title": {
+            "zh": "费用",
+            "en": "Costs"
+          },
           "icon": "coin",
           "placement": [
             "session.tab",
@@ -44,20 +47,11 @@
         },
         {
           "id": "prices",
-          "title": "价格设置",
-          "icon": "wallet",
-          "placement": [
-            "session.tab",
-            "features"
-          ]
-        },
-        {
-          "id": "more",
           "title": {
-            "zh": "更多",
-            "en": "More"
+            "zh": "价格设置",
+            "en": "Prices"
           },
-          "icon": "settings",
+          "icon": "wallet",
           "placement": [
             "session.tab",
             "features"

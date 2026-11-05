@@ -4,6 +4,7 @@ import { DEFAULT_CONFIG, clone, parseWindows, sanitize, toMinutes } from '../lib
 import { costParts, effectivePeak, isPeakAt, nextSwitch, priceCall, resolvePrice, wallClock } from '../lib/pricing.js'
 import { share, summarize } from '../lib/summary.js'
 import { collectFields, applyPeak, applyModels, applyAddModel, applyCurrency, applyDefault, deleteModel, addUnpriced, editableModels, ensureModelEntry, modelOptions, pricesData, selectionOf, unpricedModels } from '../lib/editor.js'
+import { applyGlobalTemplate, applyModelTemplate } from '../lib/templates.js'
 
 const at = (iso) => Date.parse(iso)
 const config = () => sanitize(clone(DEFAULT_CONFIG)).config
@@ -281,4 +282,38 @@ test('兜底价 default、单位、删除模型', () => {
   assert.equal(del.config.models[key], undefined)
   assert.equal(deleteModel(cfg, { del_key: 'default' }, { notDeletable: 'no' }).error, 'no')
   assert.equal(deleteModel(cfg, { del_key: 'nope' }, { notFound: 'nf' }).error, 'nf')
+})
+
+test('全局模板：只改时段，不碰价格', () => {
+  const cfg = config()
+  const key = Object.keys(cfg.models)[0]
+  const before = JSON.stringify(cfg.models)
+  const bailian = applyGlobalTemplate(cfg, 'bailian')
+  assert.deepEqual(bailian.config.peak.windows, [{ start: '08:00', end: '22:00' }])
+  assert.equal(bailian.config.peak.weekend, 'ignore')
+  assert.deepEqual(bailian.config.peak.holidays, [])
+  assert.equal(JSON.stringify(bailian.config.models), before)
+  assert.equal(applyGlobalTemplate(cfg, 'flat').config.peak.enabled, false)
+  assert.equal(applyGlobalTemplate(cfg, 'proto').error, 'tpl')
+  assert.equal(applyGlobalTemplate(cfg, 'constructor').error, 'tpl')
+})
+
+test('模型模板：峰谷关系只动选中模型', () => {
+  const cfg = config()
+  cfg.models.other = { offPeak: { input: 5, cacheRead: 0.5, output: 20 } }
+  const key = Object.keys(cfg.models)[0]
+  cfg.models[key] = { offPeak: { input: 1, cacheRead: 0.1, output: 4 }, peak: { input: 1, cacheRead: 0.1, output: 4 } }
+  const p2 = applyModelTemplate(cfg, key, 'peak2x')
+  assert.deepEqual(p2.config.models[key].peak, { input: 2, cacheRead: 0.2, output: 8 })
+  assert.deepEqual(p2.config.models.other, cfg.models.other, '别的模型不动')
+  const half = applyModelTemplate(p2.config, key, 'half')
+  assert.deepEqual(half.config.models[key].offPeak, { input: 1, cacheRead: 0.1, output: 4 })
+  const same = applyModelTemplate(p2.config, key, 'same')
+  assert.deepEqual(same.config.models[key].peak, same.config.models[key].offPeak)
+  const sched = applyModelTemplate(cfg, key, 'peak2x')
+  sched.config.models[key].schedule = { windows: [{ start: '08:00', end: '22:00' }], weekend: 'ignore' }
+  const back = applyModelTemplate(sched.config, key, 'global')
+  assert.deepEqual(back.config.models[key].schedule, { weekend: 'ignore' })
+  assert.equal(applyModelTemplate(cfg, 'ghost', 'peak2x').error, 'nf')
+  assert.equal(applyModelTemplate(cfg, key, 'nope').error, 'tpl')
 })

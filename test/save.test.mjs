@@ -69,7 +69,7 @@ test('时段与新增模型走同一个归一化', async () => {
   const { dir, panels } = await loadPlugin()
   assert.equal(panels.prices.actions.savePeak({}, { value: { 'data.g_windows': '08:00-22:00' }, locale: 'zh-CN' }).toast, '已保存')
   assert.deepEqual(read(dir).peak.windows, [{ start: '08:00', end: '22:00' }])
-  assert.equal(panels.more.actions.addModel({}, { value: { 'data.n_key': 'bailian:ds', 'data.n_in': 1 }, locale: 'zh-CN' }).toast, '已保存')
+  assert.equal(panels.prices.actions.addModel({}, { value: { 'data.n_key': 'bailian:ds', 'data.n_in': 1 }, locale: 'zh-CN' }).toast, '已保存')
   assert.equal(read(dir).models['bailian:ds'].offPeak.input, 1)
 })
 
