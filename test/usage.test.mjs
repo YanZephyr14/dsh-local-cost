@@ -80,3 +80,35 @@ test('目录不存在时安静返回空', () => {
   const result = scanner.scan(path.join(os.tmpdir(), 'local-cost-does-not-exist'))
   assert.deepEqual(result, { calls: [], files: 0, unreadable: 0, empty: true })
 })
+
+const forked = (time, respId, usage) =>
+  JSON.stringify({
+    type: 'assistant/message',
+    time,
+    data: {
+      message: { role: 'assistant', id: `msg-${respId}`, content: [], source: { kind: 'model', provider: 'p', model: 'm1', replayState: { response: { responseId: respId } } } },
+      usage,
+    },
+  })
+
+test('会话分叉：复制的历史记录只算一次，归属更新的日志', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'local-cost-fork-'))
+  const oldDir = path.join(root, '--ws--', 'session-old')
+  const newDir = path.join(root, '--ws--', 'session-new')
+  fs.mkdirSync(oldDir, { recursive: true })
+  fs.mkdirSync(newDir, { recursive: true })
+  const oldBody = [forked(1000, 'r1', { inputTokens: 100, outputTokens: 10 }), forked(2000, 'r2', { inputTokens: 200, outputTokens: 20 })]
+  const newBody = [...oldBody, forked(3000, 'r3', { inputTokens: 300, outputTokens: 30 })]
+  const oldFile = path.join(oldDir, 'session.v4.jsonl.zstd')
+  const newFile = path.join(newDir, 'session.v4.jsonl.zstd')
+  fs.writeFileSync(oldFile, zlib.zstdCompressSync(Buffer.from(oldBody.join('\n'), 'utf8')))
+  fs.writeFileSync(newFile, zlib.zstdCompressSync(Buffer.from(newBody.join('\n'), 'utf8')))
+  fs.utimesSync(oldFile, new Date(1000), new Date(1000))
+  fs.utimesSync(newFile, new Date(9000), new Date(9000))
+
+  const scan = createScanner().scan(root)
+  assert.equal(scan.calls.length, 3, '重复的 r1/r2 只算一次')
+  const sum = scan.calls.reduce((a, c) => a + c.input, 0)
+  assert.equal(sum, 600)
+  assert.equal(scan.calls.filter((c) => c.session === 'session-new').length, 3, '复制副本归属新会话')
+})
