@@ -1,0 +1,29 @@
+{
+  "v": 1,
+  "currency": {
+    "code": "CNY",
+    "symbol": "¥",
+    "perTokens": 1000000,
+    "decimals": 3
+  },
+  "peak": {
+    "enabled": true,
+    "tz": "Asia/Shanghai",
+    "windows": [
+      { "start": "09:00", "end": "12:00" },
+      { "start": "14:00", "end": "18:00" }
+    ],
+    "weekend": "offPeak",
+    "holidays": ["2026-10-01"]
+  },
+  "models": {
+    "custom-dashscope-aliyuncs:deepseek-v4.1-flash-1017": {
+      "offPeak": { "input": 1, "cacheRead": 0.1, "output": 4 },
+      "peak": { "input": 2, "cacheRead": 0.2, "output": 8 }
+    },
+    "default": {
+      "offPeak": { "input": 1, "cacheRead": 0.1, "output": 4 },
+      "peak": { "input": 2, "cacheRead": 0.2, "output": 8 }
+    }
+  }
+}

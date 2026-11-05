@@ -1,0 +1,43 @@
+{
+  "name": "local-cost",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "description": "自配价格的峰谷计费：输入框上方今日费用 + 费用构成与价格设置面板",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "dsh": ">=0.2.1-rc.2 <0.3.0-0"
+  },
+  "dshGo": {
+    "v": 1,
+    "title": { "zh": "费用自配", "en": "Cost" },
+    "icon": "coin",
+    "contributes": {
+      "composer.strip": [
+        { "id": "today", "icon": "coin", "text": "今日 —", "panel": "cost" }
+      ],
+      "panels": [
+        {
+          "id": "cost",
+          "title": "费用",
+          "icon": "coin",
+          "placement": ["session.tab", "features"]
+        },
+        {
+          "id": "prices",
+          "title": "价格设置",
+          "icon": "wallet",
+          "placement": ["session.tab", "features"]
+        }
+      ]
+    }
+  }
+}

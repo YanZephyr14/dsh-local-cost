@@ -1,0 +1,6 @@
+# 运行时生成的配置（用户自己的价格与峰时段），不纳入版本库
+price.json
+price.json.tmp-*
+node_modules/
+.DS_Store
+*.log
