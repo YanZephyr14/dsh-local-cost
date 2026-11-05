@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { DEFAULT_CONFIG, clone, parseWindows, sanitize, toMinutes } from '../lib/config.js'
 import { costParts, effectivePeak, isPeakAt, nextSwitch, priceCall, resolvePrice, wallClock } from '../lib/pricing.js'
 import { share, summarize } from '../lib/summary.js'
-import { collectFields, applyPeak, applyModels, applyAddModel, applyCurrency, applyDefault, deleteModel, addUnpriced, editableModels, pricesData, unpricedModels } from '../lib/editor.js'
+import { collectFields, applyPeak, applyModels, applyAddModel, applyCurrency, applyDefault, deleteModel, addUnpriced, editableModels, ensureModelEntry, modelOptions, pricesData, selectionOf, unpricedModels } from '../lib/editor.js'
 
 const at = (iso) => Date.parse(iso)
 const config = () => sanitize(clone(DEFAULT_CONFIG)).config
@@ -144,18 +144,57 @@ test('时段表单：只改窗口不动价格', () => {
   assert.equal(applyPeak(cfg, { g_weekend: '周末' }, { weekend: 'bad-wk' }).error, 'bad-wk')
 })
 
-test('单价表单：改谷时与峰时，其余模型不动', () => {
+test('单价表单：只作用于选中模型', () => {
   const cfg = config()
-  cfg.models.second = { offPeak: { input: 7, output: 8 } }
-  const data = collectFields({ data: { p0_in: '3', p0_cr: '0.3', p0_out: '9', P0_in: '6', P0_cr: '0.6', P0_out: '18' } })
-  const r = applyModels(cfg, data, { noChange: 'same' })
+  const key = Object.keys(cfg.models)[0]
+  cfg.models.second = { offPeak: { input: 7, cacheRead: 0, output: 8 }, peak: { input: 7, cacheRead: 0, output: 8 } }
+  const fields = collectFields({ data: { m_in: '3', m_cr: '0.3', m_out: '9', M_in: '6', M_cr: '0.6', M_out: '18' } })
+  const r = applyModels(cfg, fields, { noChange: 'same', notFound: 'nf' }, key)
   assert.equal(r.error, undefined)
-  assert.equal(r.touched, 1)
-  const first = r.config.models[editableModels(cfg)[0].key]
-  assert.deepEqual(first.offPeak, { input: 3, cacheRead: 0.3, output: 9 })
-  assert.deepEqual(first.peak, { input: 6, cacheRead: 0.6, output: 18 })
-  assert.deepEqual(r.config.models.second, cfg.models.second)
-  assert.equal(applyModels(cfg, collectFields({ data: pricesData(cfg) }), { noChange: 'same' }).error, 'same')
+  assert.equal(r.key, key)
+  assert.deepEqual(r.config.models[key].offPeak, { input: 3, cacheRead: 0.3, output: 9 })
+  assert.deepEqual(r.config.models[key].peak, { input: 6, cacheRead: 0.6, output: 18 })
+  assert.deepEqual(r.config.models.second, cfg.models.second, '别的模型不动')
+  // m_sel 指定另一个模型
+  const r2 = applyModels(cfg, { m_sel: 'second', m_in: 5 }, { noChange: 'same', notFound: 'nf' }, key)
+  assert.equal(r2.config.models.second.offPeak.input, 5)
+  assert.equal(r2.config.models[key].offPeak.input, 1)
+  assert.equal(applyModels(cfg, { m_in: 1 }, { noChange: 'same', notFound: 'nf' }, 'ghost').error, 'nf')
+  assert.equal(applyModels(cfg, collectFields({ data: pricesData(cfg, key) }), { noChange: 'same', notFound: 'nf' }, key).error, 'same')
+})
+
+test('选中模型：失效回落第一个；数据跟着选中切换', () => {
+  const cfg = config()
+  const keys = modelOptions(cfg).map((m) => m.key)
+  assert.equal(selectionOf(cfg, 'ghost'), keys[0])
+  assert.equal(selectionOf(cfg, null), keys[0])
+  const data = pricesData(cfg, keys[0])
+  assert.equal(data.m_sel, keys[0])
+  assert.equal(data.m_in, 1)
+})
+
+test('每个模型可以覆盖/清空峰时段（m_windows）', () => {
+  const cfg = config()
+  const key = Object.keys(cfg.models)[0]
+  const set = applyModels(cfg, collectFields({ data: { m_windows: '08:00-22:00' } }), { windows: 'bad', noChange: 'same', notFound: 'nf' }, key)
+  assert.equal(set.error, undefined)
+  assert.deepEqual(set.config.models[key].schedule.windows, [{ start: '08:00', end: '22:00' }])
+  const cleared = applyModels(set.config, collectFields({ data: { m_windows: '' } }), { windows: 'bad', noChange: 'same', notFound: 'nf' }, key)
+  assert.equal(cleared.config.models[key].schedule, undefined)
+  assert.equal(applyModels(cfg, { m_windows: 'nope' }, { windows: 'bad', noChange: 'same' }, key).error, 'bad')
+})
+
+test('ensureModelEntry：未定价模型一键建条目（抄 default）', () => {
+  const cfg = config()
+  cfg.models.default = { offPeak: { input: 2, cacheRead: 0.2, output: 8 } }
+  const r = ensureModelEntry(cfg, 'qwen3.8-flash')
+  assert.equal(r.created, true)
+  assert.deepEqual(r.config.models['qwen3.8-flash'].offPeak, { input: 2, cacheRead: 0.2, output: 8 })
+  assert.deepEqual(r.config.models['qwen3.8-flash'].peak, { input: 2, cacheRead: 0.2, output: 8 })
+  const again = ensureModelEntry(r.config, 'qwen3.8-flash')
+  assert.equal(again.created, false)
+  assert.equal(ensureModelEntry(cfg, '').error, 'key')
+  assert.equal(Object.keys(cfg.models).length, 2, '原配置不动')
 })
 
 test('新增模型：空 key / 重名 / 正常', () => {
@@ -220,17 +259,6 @@ test('priceCall 按模型规则算钱', () => {
   const r = priceCall(call, cfg, wallClock(call.t, 'Asia/Shanghai'))
   assert.equal(r.peak, true)
   assert.ok(Math.abs(r.total - (1000 * 2 + 100 * 8) / 1e6) < 1e-12)
-})
-
-test('每个模型可以覆盖/清空峰时段', () => {
-  const cfg = config()
-  const key = editableModels(cfg)[0].key
-  const set = applyModels(cfg, collectFields({ data: { w0: '08:00-22:00' } }), { windows: 'bad', noChange: 'same' })
-  assert.equal(set.error, undefined)
-  assert.deepEqual(set.config.models[key].schedule.windows, [{ start: '08:00', end: '22:00' }])
-  const cleared = applyModels(set.config, collectFields({ data: { w0: '' } }), { windows: 'bad', noChange: 'same' })
-  assert.equal(cleared.config.models[key].schedule, undefined)
-  assert.equal(applyModels(cfg, collectFields({ data: { w0: 'nope' } }), { windows: 'bad', noChange: 'same' }).error, 'bad')
 })
 
 test('兜底价 default、单位、删除模型', () => {
