@@ -1,13 +1,13 @@
 {
   "name": "local-cost",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
   "scripts": {
     "test": "node --test test/*.test.mjs"
   },
-  "description": "自配价格的峰谷计费：输入框上方今日费用 + 费用构成与价格设置面板",
+  "description": "自配价格的峰谷计费：回合脚注今日费用 + 费用构成与价格设置面板",
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -24,12 +24,9 @@
     },
     "icon": "coin",
     "contributes": {
-      "composer.strip": [
+      "turn.note": [
         {
-          "id": "today",
-          "icon": "coin",
-          "text": "今日 —",
-          "panel": "cost"
+          "id": "costnote"
         }
       ],
       "panels": [

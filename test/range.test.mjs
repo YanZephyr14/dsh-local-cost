@@ -68,12 +68,13 @@ async function loadPlugin() {
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'local-cost', version: '0.0.0', type: 'module', main: 'lib/index.js' }))
   const mod = await import(pathToFileURL(path.join(dir, 'lib', 'index.js')).href)
   const panels = {}
+  const notes = {}
   mod.apply({
     inject(_deps, fn) {
-      fn({ dshGo: { panel: (id, def) => { panels[id] = def }, strip: () => {}, on: () => {} } })
+      fn({ dshGo: { panel: (id, def) => { panels[id] = def }, strip: () => {}, turnNote: (id, def) => { notes[id] = def }, on: () => {} } })
     },
   })
-  return { dir, panels }
+  return { dir, panels, notes }
 }
 
 test('费用面板：分段选择器在，自定义日期表单默认不出现', async () => {
